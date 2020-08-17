@@ -2,7 +2,14 @@ package com.hiroshi.cimoc.ui.fragment.recyclerview.grid;
 
 import android.os.Bundle;
 
+import com.google.android.gms.ads.AdListener;
+import com.google.android.gms.ads.AdLoader;
+import com.google.android.gms.ads.AdRequest;
+import com.google.android.gms.ads.formats.UnifiedNativeAd;
+import com.hiroshi.cimoc.App;
+import com.hiroshi.cimoc.BuildConfig;
 import com.hiroshi.cimoc.R;
+import com.hiroshi.cimoc.manager.PreferenceManager;
 import com.hiroshi.cimoc.model.MiniComic;
 import com.hiroshi.cimoc.presenter.BasePresenter;
 import com.hiroshi.cimoc.presenter.HistoryPresenter;
@@ -10,6 +17,7 @@ import com.hiroshi.cimoc.ui.fragment.dialog.MessageDialogFragment;
 import com.hiroshi.cimoc.ui.view.HistoryView;
 import com.hiroshi.cimoc.utils.HintUtils;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -36,6 +44,10 @@ public class HistoryFragment extends GridFragment implements HistoryView {
     @Override
     protected void initData() {
         mPresenter.load();
+        if(App.getPreferenceManager().getBoolean(PreferenceManager.PREF_OTHER_REDUCE_AD, false)) {
+            NUMBER_OF_ADS=2;
+        }
+        loadNativeAds();
     }
 
     @Override
@@ -91,7 +103,7 @@ public class HistoryFragment extends GridFragment implements HistoryView {
     }
 
     @Override
-    public void OnComicRestore(List<MiniComic> list) {
+    public void OnComicRestore(List<Object> list) {
         mGridAdapter.addAll(0, list);
     }
 
@@ -112,4 +124,49 @@ public class HistoryFragment extends GridFragment implements HistoryView {
         return new String[]{getString(R.string.comic_info), getString(R.string.history_delete)};
     }
 
+    public static int NUMBER_OF_ADS = 5;
+    private AdLoader adLoader;
+    private List<UnifiedNativeAd> mNativeAds = new ArrayList<>();
+
+    private void insertAdsInCimocItems() {
+
+        if (mNativeAds.size() <= 0) {
+            return;
+        }
+        int offset = (mGridAdapter.getDateSet().size() / mNativeAds.size()) + 1;
+        int index = 0;
+        for (UnifiedNativeAd ad : mNativeAds) {
+            mGridAdapter.add(index, ad);
+            index = index + offset;
+        }
+        mGridAdapter.notifyDataSetChanged();
+    }
+
+    private void loadNativeAds() {
+        AdLoader.Builder builder = new AdLoader.Builder(getActivity(), BuildConfig.ADMOB_NATIVE_HISTORY_UNIT_ID);
+        adLoader = builder.forUnifiedNativeAd(
+                new UnifiedNativeAd.OnUnifiedNativeAdLoadedListener() {
+                    @Override
+                    public void onUnifiedNativeAdLoaded(UnifiedNativeAd unifiedNativeAd) {
+                        // A native ad loaded successfully, check if the ad loader has finished loading
+                        // and if so, insert the ads into the list.
+                        mNativeAds.add(unifiedNativeAd);
+                        if (!adLoader.isLoading()) {
+                            insertAdsInCimocItems();
+                        }
+                    }
+                }).withAdListener(
+                new AdListener() {
+                    @Override
+                    public void onAdFailedToLoad(int errorCode) {
+                        // A native ad failed to load, check if the ad loader has finished loading
+                        // and if so, insert the ads into the list.
+                        if (!adLoader.isLoading()) {
+                            insertAdsInCimocItems();
+                        }
+                    }
+                }).build();
+
+        adLoader.loadAds(new AdRequest.Builder().build(), NUMBER_OF_ADS);
+    }
 }

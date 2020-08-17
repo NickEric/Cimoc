@@ -1,6 +1,5 @@
 package com.hiroshi.cimoc.ui.activity;
 
-import android.Manifest;
 import android.content.Intent;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
@@ -13,10 +12,14 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.annotation.StyleRes;
 
+import com.google.android.gms.ads.AdRequest;
+import com.google.android.gms.ads.AdView;
+import com.google.android.gms.ads.MobileAds;
+import com.google.android.gms.ads.initialization.InitializationStatus;
+import com.google.android.gms.ads.initialization.OnInitializationCompleteListener;
 import com.google.android.gms.tasks.OnCompleteListener;
 import com.google.android.gms.tasks.Task;
 import com.google.android.material.navigation.NavigationView;
-import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 import androidx.core.view.GravityCompat;
 import androidx.drawerlayout.widget.DrawerLayout;
@@ -39,6 +42,7 @@ import com.google.firebase.remoteconfig.FirebaseRemoteConfigSettings;
 import com.hiroshi.cimoc.App;
 import com.hiroshi.cimoc.R;
 import com.hiroshi.cimoc.component.ThemeResponsive;
+import com.hiroshi.cimoc.core.Update;
 import com.hiroshi.cimoc.fresco.ControllerBuilderProvider;
 import com.hiroshi.cimoc.global.Extra;
 import com.hiroshi.cimoc.manager.PreferenceManager;
@@ -53,6 +57,7 @@ import com.hiroshi.cimoc.ui.view.MainView;
 import com.hiroshi.cimoc.utils.HintUtils;
 import com.hiroshi.cimoc.utils.PermissionUtils;
 
+import com.king.app.updater.constant.Constants;
 import butterknife.BindView;
 
 
@@ -94,6 +99,9 @@ public class MainActivity extends BaseActivity implements MainView, NavigationVi
     private BaseFragment mCurrentFragment;
     private boolean night;
 
+    private Update update = new Update();
+    private String versionName,content,mUrl,md5;
+    private int versionCode;
     //auth0
 //    private Auth0 auth0;
 
@@ -193,6 +201,14 @@ public class MainActivity extends BaseActivity implements MainView, NavigationVi
         showPermission();
     }
 
+    @Override
+    protected void initAdMob() {
+        MobileAds.initialize(this, new OnInitializationCompleteListener() {
+            @Override
+            public void onInitializationComplete(InitializationStatus initializationStatus) {}
+        });
+    }
+
 //    public void getUesrInfo() {
 //        String accessTocken = mPreference.getString(PreferenceManager.PREFERENCES_USER_TOCKEN, null);
 //        if (accessTocken != null) {
@@ -254,6 +270,11 @@ public class MainActivity extends BaseActivity implements MainView, NavigationVi
         View header = mNavigationView.getHeaderView(0);
         mLastText = header.findViewById(R.id.drawer_last_title);
         mDraweeView = header.findViewById(R.id.drawer_last_cover);
+
+        AdView mAdView = header.findViewById(R.id.adView);
+        AdRequest adRequest = new AdRequest.Builder().build();
+        mAdView.loadAd(adRequest);
+
         mLastText.setOnClickListener(v -> {
             if (mPresenter.checkLocal(mLastId)) {
                 Intent intent = TaskActivity.createIntent(MainActivity.this, mLastId);
@@ -366,12 +387,7 @@ public class MainActivity extends BaseActivity implements MainView, NavigationVi
                     }
                     break;
                 case R.id.drawer_comicUpdate:
-                    Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(getString(R.string.about_update_url)));
-                    try {
-                        startActivity(intent);
-                    } catch (Exception e) {
-                        showSnackbar(R.string.about_resource_fail);
-                    }
+                    update.startUpdate(versionName, content, mUrl, versionCode, md5);
                     break;
                 case R.id.drawer_night:
                     onNightSwitch();
@@ -421,7 +437,8 @@ public class MainActivity extends BaseActivity implements MainView, NavigationVi
                 //showPermission();
                 break;
             case DIALOG_REQUEST_PERMISSION:
-                ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, 0);
+                com.king.app.updater.util.PermissionUtils.verifyReadAndWritePermissions(this, Constants.RE_CODE_STORAGE_PERMISSION);
+                //ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, 0);
                 break;
 //            case DIALOG_REQUEST_LOGOUT:
 //                logout();
@@ -460,6 +477,21 @@ public class MainActivity extends BaseActivity implements MainView, NavigationVi
             mNavigationView.getMenu().findItem(R.id.drawer_comicUpdate).setVisible(true);
         }
 //        Update.update(this);
+    }
+
+    @Override
+    public void onUpdateReady(String versionName, String content, String mUrl, int versionCode, String md5) {
+        this.versionName = versionName;
+        this.content = content;
+        this.mUrl = mUrl;
+        this.md5 = md5;
+        this.versionCode = versionCode;
+        if (mPreference.getBoolean(PreferenceManager.PREF_OTHER_CHECK_SOFTWARE_UPDATE, true)) {
+            mNavigationView.getMenu().findItem(R.id.drawer_comicUpdate).setVisible(true);
+            update.startUpdate(versionName, content, mUrl, versionCode, md5);
+        }else {
+            HintUtils.showToast(this, R.string.main_ready_update);
+        }
     }
 
     @Override
@@ -540,7 +572,7 @@ public class MainActivity extends BaseActivity implements MainView, NavigationVi
     }
 
     private void showPermission() {
-        if (!PermissionUtils.hasStoragePermission(this)) {
+        if (!PermissionUtils.hasAllPermissions(this)) {
             MessageDialogFragment fragment = MessageDialogFragment.newInstance(R.string.main_permission,
                     R.string.main_permission_content, false, DIALOG_REQUEST_PERMISSION);
             fragment.show(getFragmentManager(), null);
@@ -550,7 +582,8 @@ public class MainActivity extends BaseActivity implements MainView, NavigationVi
     private void checkUpdate() {
         try {
             PackageInfo info = getPackageManager().getPackageInfo(getPackageName(), 0);
-            mPresenter.checkUpdate(info.versionName);
+            mPresenter.checkGiteeUpdate(info.versionCode);
+            //mPresenter.checkUpdate(info.versionName);
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -582,5 +615,4 @@ public class MainActivity extends BaseActivity implements MainView, NavigationVi
     protected View getLayoutView() {
         return mDrawerLayout;
     }
-
 }

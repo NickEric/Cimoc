@@ -8,8 +8,15 @@ import android.os.Build;
 import android.os.Bundle;
 import android.view.View;
 
+import com.google.android.gms.ads.AdListener;
+import com.google.android.gms.ads.AdLoader;
+import com.google.android.gms.ads.AdRequest;
+import com.google.android.gms.ads.formats.UnifiedNativeAd;
+import com.hiroshi.cimoc.App;
+import com.hiroshi.cimoc.BuildConfig;
 import com.hiroshi.cimoc.R;
 import com.hiroshi.cimoc.global.Extra;
+import com.hiroshi.cimoc.manager.PreferenceManager;
 import com.hiroshi.cimoc.model.MiniComic;
 import com.hiroshi.cimoc.presenter.BasePresenter;
 import com.hiroshi.cimoc.presenter.LocalPresenter;
@@ -22,6 +29,7 @@ import com.hiroshi.cimoc.utils.HintUtils;
 import com.hiroshi.cimoc.utils.StringUtils;
 
 import java.io.File;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -49,6 +57,10 @@ public class LocalFragment extends GridFragment implements LocalView {
     @Override
     protected void initData() {
         mPresenter.load();
+        if(!App.getPreferenceManager().getBoolean(PreferenceManager.PREF_OTHER_REDUCE_AD, false)) {
+            loadNativeAds();
+        }
+
     }
 
     @Override
@@ -74,15 +86,19 @@ public class LocalFragment extends GridFragment implements LocalView {
                     showProgressDialog();
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
                         Uri uri = data.getData();
-                        int flags = data.getFlags() & (Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                        getActivity().getContentResolver().takePersistableUriPermission(uri, flags);
-                        mPresenter.scan(DocumentFile.fromTreeUri(getActivity(), uri));
+                        if (uri != null) {
+                            int flags = data.getFlags() & (Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                            getActivity().getContentResolver().takePersistableUriPermission(uri, flags);
+                            mPresenter.scan(DocumentFile.fromTreeUri(getActivity(), uri));
+                        }
                     } else {
                         String path = data.getStringExtra(Extra.EXTRA_PICKER_PATH);
-                        if (!StringUtils.isEmpty(path)) {
-                            mPresenter.scan(DocumentFile.fromFile(new File(path)));
-                        } else {
-                            onExecuteFail();
+                        if (path != null) {
+                            if (!StringUtils.isEmpty(path)) {
+                                mPresenter.scan(DocumentFile.fromFile(new File(path)));
+                            } else {
+                                onExecuteFail();
+                            }
                         }
                     }
                     break;
@@ -92,7 +108,7 @@ public class LocalFragment extends GridFragment implements LocalView {
 
     @Override
     public void onItemClick(View view, int position) {
-        MiniComic comic = mGridAdapter.getItem(position);
+        MiniComic comic = (MiniComic) mGridAdapter.getItem(position);
         Intent intent = TaskActivity.createIntent(getActivity(), comic.getId());
         startActivity(intent);
     }
@@ -128,7 +144,7 @@ public class LocalFragment extends GridFragment implements LocalView {
     }
 
     @Override
-    public void onLocalScanSuccess(List<MiniComic> list) {
+    public void onLocalScanSuccess(List<Object> list) {
         hideProgressDialog();
         mGridAdapter.addAll(list);
     }
@@ -147,6 +163,52 @@ public class LocalFragment extends GridFragment implements LocalView {
     @Override
     protected String[] getOperationItems() {
         return new String[]{getString(R.string.comic_info), getString(R.string.local_delete)};
+    }
+
+    public static int NUMBER_OF_ADS = 3;
+    private AdLoader adLoader;
+    private List<UnifiedNativeAd> mNativeAds = new ArrayList<>();
+
+    private void insertAdsInCimocItems() {
+
+        if (mNativeAds.size() <= 0) {
+            return;
+        }
+        int offset = (mGridAdapter.getDateSet().size() / mNativeAds.size()) + 1;
+        int index = 0;
+        for (UnifiedNativeAd ad : mNativeAds) {
+            mGridAdapter.add(index, ad);
+            index = index + offset;
+        }
+        mGridAdapter.notifyDataSetChanged();
+    }
+
+    private void loadNativeAds() {
+        AdLoader.Builder builder = new AdLoader.Builder(getActivity(), BuildConfig.ADMOB_NATIVE_LOCAL_UNIT_ID);
+        adLoader = builder.forUnifiedNativeAd(
+                new UnifiedNativeAd.OnUnifiedNativeAdLoadedListener() {
+                    @Override
+                    public void onUnifiedNativeAdLoaded(UnifiedNativeAd unifiedNativeAd) {
+                        // A native ad loaded successfully, check if the ad loader has finished loading
+                        // and if so, insert the ads into the list.
+                        mNativeAds.add(unifiedNativeAd);
+                        if (!adLoader.isLoading()) {
+                            insertAdsInCimocItems();
+                        }
+                    }
+                }).withAdListener(
+                new AdListener() {
+                    @Override
+                    public void onAdFailedToLoad(int errorCode) {
+                        // A native ad failed to load, check if the ad loader has finished loading
+                        // and if so, insert the ads into the list.
+                        if (!adLoader.isLoading()) {
+                            insertAdsInCimocItems();
+                        }
+                    }
+                }).build();
+
+        adLoader.loadAds(new AdRequest.Builder().build(), NUMBER_OF_ADS);
     }
 
 }
